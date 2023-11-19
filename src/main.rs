@@ -1,4 +1,5 @@
 #![deny(warnings)]
+use futures_util::{FutureExt, StreamExt};
 use warp::Filter;
 use serde::{Serialize, Deserialize};
 
@@ -24,11 +25,28 @@ async fn main() {
             warp::reply::json(&payload)
         });
 
+    let echo_ws = warp::path("echo_ws")
+        // The `ws()` filter will prepare the Websocket handshake.
+        .and(warp::ws())
+        .map(|ws: warp::ws::Ws| {
+            // And then our closure will be called when it completes...
+            ws.on_upgrade(|websocket| {
+                // Just echo all messages back...
+                let (tx, rx) = websocket.split();
+                rx.forward(tx).map(|result| {
+                    if let Err(e) = result {
+                        eprintln!("websocket error: {:?}", e);
+                    }
+                })
+            })
+        });
+
     let logger = warp::log("hello::api");
     let routes = warp::path::end()
         .map(|| "hello world")
         .or(get_hello_json)
         .or(post_hello_json)
+        .or(echo_ws)
         .with(logger);
 
     warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
